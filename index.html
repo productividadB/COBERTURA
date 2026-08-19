@@ -142,7 +142,7 @@ main{max-width:1480px; margin:0 auto; padding:0 30px 90px}
 .stat-pill .l{font-size:11px; color:rgba(255,255,255,.85)}
 .stat-pill.p1{background:linear-gradient(135deg,#1E9E63,#12734A)}
 .stat-pill.p2{background:linear-gradient(135deg,#0EA5C7,#0a7a99)}
-.stat-pill.p3{background:linear-gradient(135deg,#7C6CE0,#5A4BC4)}
+.stat-pill.p3{background:linear-gradient(135deg,#E0574A,#B93B2F)}
 
 /* ============ KPIs (used in other views) ============ */
 .kpi-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:13px; margin:4px 0 20px}
@@ -433,6 +433,7 @@ tbody tr:hover td{background:var(--surface-2)}
     <div class="filter-bar">
       <input type="text" id="f-search" placeholder="Buscar tienda o ejecutiva…">
       <select id="f-zona"><option value="">Todas las zonas</option></select>
+      <select id="f-region"><option value="">Todas las regiones</option></select>
       <select id="f-ejecutiva"><option value="">Todas las ejecutivas</option></select>
       <select id="f-semaforo">
         <option value="">Todos los semáforos</option>
@@ -447,7 +448,7 @@ tbody tr:hover td{background:var(--surface-2)}
     </div>
     <div class="table-wrap">
       <table id="detail-table">
-        <thead><tr><th>Tienda</th><th>Zona</th><th>Ejecutiva</th><th>Plantilla</th><th>Cobertura</th><th>Con usuario</th><th>Semáforo</th><th>Reincidencia</th></tr></thead>
+        <thead><tr><th>Tienda</th><th>Zona</th><th>Región</th><th>Ejecutiva</th><th>Plantilla</th><th>Cobertura</th><th>Con usuario</th><th>Semáforo</th><th>Reincidencia</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -492,7 +493,7 @@ tbody tr:hover td{background:var(--surface-2)}
     <div class="section-desc">Las 10 tiendas con mayor cobertura promedio en lo que va del mes.</div>
     <div class="table-wrap">
       <table id="ranking-mejores-table">
-        <thead><tr><th>#</th><th>Tienda</th><th>Zona</th><th>Ejecutiva</th><th>Cobertura promedio</th><th>Días en rojo</th></tr></thead>
+        <thead><tr><th>#</th><th>Tienda</th><th>Zona</th><th>Región</th><th>Ejecutiva</th><th>Cobertura promedio</th><th>Días en rojo</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -501,7 +502,7 @@ tbody tr:hover td{background:var(--surface-2)}
     <div class="section-desc">Las 10 tiendas con más días en semáforo rojo (crítica o alarmante) este mes — donde conviene enfocar el esfuerzo primero.</div>
     <div class="table-wrap">
       <table id="ranking-peores-table">
-        <thead><tr><th>#</th><th>Tienda</th><th>Zona</th><th>Ejecutiva</th><th>Días en rojo</th><th>Cobertura promedio</th></tr></thead>
+        <thead><tr><th>#</th><th>Tienda</th><th>Zona</th><th>Región</th><th>Ejecutiva</th><th>Días en rojo</th><th>Cobertura promedio</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -733,13 +734,52 @@ function renderActividad(){
 function renderStatPills(){
   const stores = Object.values(RESULT.stores);
   const cobertura = stores.length ? stores.reduce((a,s)=>a+s.hoy.cobertura_pct,0)/stores.length : 0;
-  const rotacion = stores.length ? stores.reduce((a,s)=>a+s.rotacion_pct,0)/stores.length : 0;
+  const faltasHoy = stores.reduce((a,s)=>a+s.hoy.faltantes_hoy,0);
   const wrap = document.getElementById('stat-pills'); wrap.innerHTML='';
   [
-    {ic:'🏬', n:stores.length, l:'Tiendas operando hoy', c:'p1'},
-    {ic:'📈', n:pct(cobertura), l:'Cobertura global promedio', c:'p2'},
-    {ic:'🔄', n:pct(rotacion), l:'% Rotación promedio del mes', c:'p3'},
-  ].forEach(s=> wrap.appendChild(el('div','stat-pill '+s.c, `<div class="ic">${s.ic}</div><div><div class="n">${s.n}</div><div class="l">${s.l}</div></div>`)));
+    {ic:'🏬', n:stores.length, l:'Tiendas operando hoy', c:'p1', click:null},
+    {ic:'📈', n:pct(cobertura), l:'Cobertura global promedio', c:'p2', click:null},
+    {ic:'⚠️', n:faltasHoy, l:'Faltas en el día · clic para ver detalle', c:'p3', click:openFaltasModal},
+  ].forEach(s=>{
+    const pill = el('div','stat-pill '+s.c, `<div class="ic">${s.ic}</div><div><div class="n">${s.n}</div><div class="l">${s.l}</div></div>`);
+    if(s.click){ pill.style.cursor='pointer'; pill.addEventListener('click', s.click); }
+    wrap.appendChild(pill);
+  });
+}
+
+// ================= MODAL DE SEGUIMIENTO DE FALTAS =================
+function openFaltasModal(){
+  const rows = [];
+  Object.entries(RESULT.stores).forEach(([key,s])=>{
+    (s.hoy.faltaron||[]).forEach(nombre=>{
+      const emp = s.empleados_activos.find(e=>e.nombre===nombre);
+      rows.push({
+        nombre, tienda: s.info.tienda_nombre||key, zona: s.info.zona||'', region: s.info.region||'',
+        ejecutiva: s.info.ejecutiva||'', puesto: emp?emp.puesto:'', faltas_mes: emp?emp.faltas_mes:'?',
+        asistencias_mes: emp?emp.asistencias_mes:'?', usuario: emp?(emp.con_usuario?emp.usuario:'Sin usuario'):''
+      });
+    });
+  });
+  rows.sort((a,b)=> (b.faltas_mes==='?'?0:b.faltas_mes) - (a.faltas_mes==='?'?0:a.faltas_mes));
+
+  const body = rows.length ? `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th><th>Tienda</th><th>Zona</th><th>Región</th><th>Ejecutiva</th><th>Puesto</th><th>Faltas del mes</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr><td><b>${r.nombre}</b></td><td>${r.tienda}</td><td><span class="pill-tag">${r.zona}</span></td><td>${r.region}</td><td>${r.ejecutiva}</td><td>${r.puesto}</td><td style="color:var(--bad);font-weight:700">${r.faltas_mes}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `<div style="color:var(--ink-faint);font-size:13px">Nadie faltó hoy. 🎉</div>`;
+
+  document.getElementById('modal').innerHTML = `
+    <div class="modal-head">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <h2>⚠️ Faltas de hoy — seguimiento</h2>
+      <div class="sub">${rows.length} persona(s) faltaron hoy · corte día ${RESULT.meta.reference_day}</div>
+    </div>
+    <div class="modal-body">${body}</div>`;
+  document.getElementById('modal-overlay').classList.add('show');
 }
 
 function renderKpis(){
@@ -815,13 +855,15 @@ function renderExecTable(){
 }
 
 function getZonas(){ return [...new Set(Object.values(RESULT.stores).map(s=>s.info.zona).filter(Boolean))].sort(); }
+function getRegiones(){ return [...new Set(Object.values(RESULT.stores).map(s=>s.info.region).filter(Boolean))].sort(); }
 function getEjecutivas(){ return [...new Set(Object.values(RESULT.stores).map(s=>s.info.ejecutiva).filter(Boolean))].sort(); }
 function fillSelect(sel, values, ph){ sel.innerHTML = `<option value="">${ph}</option>`; values.forEach(v=>{const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o);}); }
 
 function renderFilters(){
   fillSelect(document.getElementById('f-zona'), getZonas(), 'Todas las zonas');
+  fillSelect(document.getElementById('f-region'), getRegiones(), 'Todas las regiones');
   fillSelect(document.getElementById('f-ejecutiva'), getEjecutivas(), 'Todas las ejecutivas');
-  ['f-search','f-zona','f-ejecutiva','f-semaforo'].forEach(id=>{
+  ['f-search','f-zona','f-region','f-ejecutiva','f-semaforo'].forEach(id=>{
     document.getElementById(id).addEventListener('input', ()=>{ QUICK_FILTER=null; renderDetailTable(); });
     document.getElementById(id).addEventListener('change', ()=>{ QUICK_FILTER=null; renderDetailTable(); });
   });
@@ -829,6 +871,7 @@ function renderFilters(){
     QUICK_FILTER=null;
     document.getElementById('f-search').value='';
     document.getElementById('f-zona').value='';
+    document.getElementById('f-region').value='';
     document.getElementById('f-ejecutiva').value='';
     document.getElementById('f-semaforo').value='';
     renderDetailTable();
@@ -844,14 +887,16 @@ function progressColor(pctVal){
 function getFilteredStores(){
   const q=document.getElementById('f-search').value.toLowerCase();
   const zona=document.getElementById('f-zona').value;
+  const region=document.getElementById('f-region').value;
   const ejec=document.getElementById('f-ejecutiva').value;
   const sem=document.getElementById('f-semaforo').value;
   return Object.entries(RESULT.stores).filter(([key,s])=>{
     if(zona && s.info.zona!==zona) return false;
+    if(region && s.info.region!==region) return false;
     if(ejec && s.info.ejecutiva!==ejec) return false;
     if(sem && s.hoy.semaforo!==sem) return false;
     if(QUICK_FILTER==='RIESGO_USUARIO' && !s.hoy.riesgo_usuario) return false;
-    const hay=(key+' '+(s.info.tienda_nombre||'')+' '+(s.info.ejecutiva||'')+' '+(s.info.zona||'')).toLowerCase();
+    const hay=(key+' '+(s.info.tienda_nombre||'')+' '+(s.info.ejecutiva||'')+' '+(s.info.zona||'')+' '+(s.info.region||'')).toLowerCase();
     if(q && !hay.includes(q)) return false;
     return true;
   });
@@ -864,6 +909,7 @@ function renderDetailTable(){
     const tr=document.createElement('tr'); tr.className='clickable';
     tr.innerHTML = `<td><b>${s.info.tienda_nombre||key}</b><br><span class="mono" style="color:var(--ink-faint);font-size:11px">${key}</span></td>
       <td><span class="pill-tag">${s.info.zona||''}</span></td>
+      <td>${s.info.region||''}</td>
       <td>${s.info.ejecutiva||''}</td>
       <td>${s.activos_n}/${s.plantilla_autorizada}</td>
       <td><div class="progress"><div class="fill" style="width:${Math.min(100,s.hoy.cobertura_pct)}%;background:${progressColor(s.hoy.cobertura_pct)}"></div></div><div class="progress-lbl">${pct(s.hoy.cobertura_pct)}</div></td>
@@ -993,7 +1039,7 @@ function renderRanking(){
   mejores.forEach(([key,s],i)=>{
     tbodyM.appendChild(el('tr','', `<td><span class="rank-num">${i+1}</span></td>
       <td><b>${s.info.tienda_nombre||key}</b></td><td><span class="pill-tag">${s.info.zona||''}</span></td>
-      <td>${s.info.ejecutiva||''}</td><td style="color:var(--ok);font-weight:700">${pct(s.promedio_cobertura_mes)}</td>
+      <td>${s.info.region||''}</td><td>${s.info.ejecutiva||''}</td><td style="color:var(--ok);font-weight:700">${pct(s.promedio_cobertura_mes)}</td>
       <td>${s.dias_rojo_mes}</td>`));
   });
 
@@ -1002,7 +1048,7 @@ function renderRanking(){
   peores.forEach(([key,s],i)=>{
     tbodyP.appendChild(el('tr','', `<td><span class="rank-num">${i+1}</span></td>
       <td><b>${s.info.tienda_nombre||key}</b></td><td><span class="pill-tag">${s.info.zona||''}</span></td>
-      <td>${s.info.ejecutiva||''}</td><td style="color:var(--bad);font-weight:700">${s.dias_rojo_mes} día(s)</td>
+      <td>${s.info.region||''}</td><td>${s.info.ejecutiva||''}</td><td style="color:var(--bad);font-weight:700">${s.dias_rojo_mes} día(s)</td>
       <td>${pct(s.promedio_cobertura_mes)}</td>`));
   });
 }
@@ -1128,12 +1174,14 @@ const SEM_COLOR_HEX = {ALARMANTE:'#8B1538', CRITICA:'#E0574A', RIESGO:'#DA9A0E',
 function getActiveFilterLabels(){
   const labels = [];
   const zona = document.getElementById('f-zona').value;
+  const region = document.getElementById('f-region').value;
   const ejec = document.getElementById('f-ejecutiva').value;
   const sem = document.getElementById('f-semaforo').value;
   const q = document.getElementById('f-search').value;
   if(sem) labels.push('Semáforo: '+SEM_LABEL[sem]);
   if(ejec) labels.push('Ejecutiva: '+ejec);
   if(zona) labels.push('Zona: '+zona);
+  if(region) labels.push('Región: '+region);
   if(q) labels.push('Búsqueda: "'+q+'"');
   if(QUICK_FILTER==='RIESGO_USUARIO') labels.push('Con riesgo de usuario');
   if(labels.length===0) labels.push('Todas las tiendas operando');
