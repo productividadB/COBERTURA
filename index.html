@@ -242,7 +242,13 @@ tbody tr:hover td{background:var(--surface-2)}
 .hm-cell{width:16px;height:16px;border-radius:4px;display:inline-block}
 
 /* rotation tab */
-.rot-summary{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.trend-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px 24px; box-shadow:var(--shadow)}
+.trend-chart{display:flex; align-items:flex-end; gap:6px; height:180px; padding:10px 0 4px}
+.trend-bar{flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:6px; min-width:0}
+.trend-bar .bar{width:100%; max-width:26px; border-radius:5px 5px 2px 2px; background:var(--accent); min-height:2px}
+.trend-bar .lbl{font-size:10px; color:var(--ink-faint)}
+.trend-bar .val{font-size:9.5px; color:var(--ink-soft); font-weight:700}
+.rank-num{display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:var(--surface-2); border:1px solid var(--border); font-weight:700; font-size:11px}
 
 /* ============ MODAL ============ */
 #modal-overlay{position:fixed; inset:0; background:rgba(20,26,45,.55); display:none; align-items:flex-start; justify-content:center; z-index:200; overflow:auto; padding:44px 16px; backdrop-filter:blur(2px)}
@@ -316,7 +322,7 @@ tbody tr:hover td{background:var(--surface-2)}
     <button data-view="resumen" class="active">Resumen</button>
     <button data-view="detalle">Detalle de tiendas</button>
     <button data-view="calendario">📅 Calendario</button>
-    <button data-view="rotacion">Rotación</button>
+    <button data-view="tendencia">📈 Tendencia y ranking</button>
   </nav>
   <div class="topbar-actions">
     <select id="mes-select" class="btn" style="font-weight:700"></select>
@@ -474,14 +480,28 @@ tbody tr:hover td{background:var(--surface-2)}
     <div class="mini-hm-wrap"><table class="mini-hm" id="heatmap-table"></table></div>
   </div>
 
-  <!-- ============ VISTA: ROTACIÓN ============ -->
-  <div class="view" id="view-rotacion">
-    <div class="section-head"><h2>🔄 Control de plantilla y rotación</h2></div>
-    <div class="section-desc">Altas y bajas registradas este mes, por tienda.</div>
-    <div class="rot-summary" id="rot-summary"></div>
+  <!-- ============ VISTA: TENDENCIA Y RANKING ============ -->
+  <div class="view" id="view-tendencia">
+    <div class="section-head"><h2>📈 Tendencia del mes</h2></div>
+    <div class="section-desc">Cobertura promedio de todas las tiendas operando, día por día. Si la línea baja, algo se está deteriorando; si sube, va mejorando.</div>
+    <div class="trend-card">
+      <div class="trend-chart" id="trend-chart"></div>
+    </div>
+
+    <div class="section-head" style="margin-top:30px"><h2>🏆 Tiendas con mejor cobertura este mes</h2></div>
+    <div class="section-desc">Las 10 tiendas con mayor cobertura promedio en lo que va del mes.</div>
     <div class="table-wrap">
-      <table id="rotacion-table">
-        <thead><tr><th>Tienda</th><th>Zona</th><th>Ejecutiva</th><th>Plantilla aut.</th><th>Altas del mes</th><th>Bajas del mes</th><th>% Rotación</th></tr></thead>
+      <table id="ranking-mejores-table">
+        <thead><tr><th>#</th><th>Tienda</th><th>Zona</th><th>Ejecutiva</th><th>Cobertura promedio</th><th>Días en rojo</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="section-head" style="margin-top:30px"><h2>🚩 Tiendas que necesitan más atención</h2></div>
+    <div class="section-desc">Las 10 tiendas con más días en semáforo rojo (crítica o alarmante) este mes — donde conviene enfocar el esfuerzo primero.</div>
+    <div class="table-wrap">
+      <table id="ranking-peores-table">
+        <thead><tr><th>#</th><th>Tienda</th><th>Zona</th><th>Ejecutiva</th><th>Días en rojo</th><th>Cobertura promedio</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -586,7 +606,8 @@ function renderAll(){
   renderFilters();
   renderDetailTable();
   renderHeatmap();
-  renderRotacion();
+  renderTendencia();
+  renderRanking();
   document.getElementById('chip-ref').textContent = 'Corte: día '+RESULT.meta.reference_day;
   renderBanners();
 }
@@ -941,24 +962,48 @@ function renderHeatmap(){
   });
 }
 
-// ================= ROTACION =================
-function renderRotacion(){
-  const stores = Object.values(RESULT.stores);
-  const totalBajas = stores.reduce((a,s)=>a+s.bajas_mes,0);
-  const totalAltas = stores.reduce((a,s)=>a+s.altas_mes,0);
-  const rotProm = stores.length ? stores.reduce((a,s)=>a+s.rotacion_pct,0)/stores.length : 0;
-  const summary = document.getElementById('rot-summary'); summary.innerHTML='';
-  [
-    {n:totalAltas, l:'Altas del mes', c:'ok'},
-    {n:totalBajas, l:'Bajas del mes', c:'bad'},
-    {n:pct(rotProm), l:'% rotación promedio', c:'warn'},
-  ].forEach(k=>summary.appendChild(el('div','kpi c-'+k.c, `<div class="n disp">${k.n}</div><div class="l">${k.l}</div>`)));
+// ================= TENDENCIA Y RANKING =================
+function renderTendencia(){
+  const refDay = RESULT.meta.reference_day;
+  const perDia = [];
+  for(let d=1; d<=refDay; d++){
+    let suma=0, n=0;
+    Object.values(RESULT.stores).forEach(s=>{
+      const dm = s.dias[d] || s.dias[String(d)];
+      if(dm){ suma += dm.cobertura_pct; n++; }
+    });
+    perDia.push({dia:d, cobertura: n? suma/n : 0});
+  }
+  const chart = document.getElementById('trend-chart'); chart.innerHTML='';
+  const maxV = Math.max(...perDia.map(p=>p.cobertura), 10);
+  perDia.forEach(p=>{
+    const h = Math.max(2, (p.cobertura/maxV)*150);
+    const color = p.cobertura>=85 ? 'var(--ok)' : (p.cobertura>=60 ? 'var(--warn)' : 'var(--bad)');
+    const col = el('div','trend-bar');
+    col.innerHTML = `<div class="val">${Math.round(p.cobertura)}%</div><div class="bar" style="height:${h}px;background:${color}"></div><div class="lbl">${p.dia}</div>`;
+    chart.appendChild(col);
+  });
+}
 
-  const tbody = document.querySelector('#rotacion-table tbody'); tbody.innerHTML='';
-  Object.entries(RESULT.stores).sort((a,b)=>b[1].rotacion_pct-a[1].rotacion_pct).forEach(([key,s])=>{
-    tbody.appendChild(el('tr','', `<td><b>${s.info.tienda_nombre||key}</b></td><td><span class="pill-tag">${s.info.zona||''}</span></td>
-      <td>${s.info.ejecutiva||''}</td><td>${s.plantilla_autorizada}</td><td>${s.altas_mes}</td>
-      <td style="color:${s.bajas_mes>0?'var(--bad)':'inherit'}">${s.bajas_mes}</td><td>${pct(s.rotacion_pct)}</td>`));
+function renderRanking(){
+  const stores = Object.entries(RESULT.stores);
+
+  const mejores = stores.slice().sort((a,b)=>b[1].promedio_cobertura_mes-a[1].promedio_cobertura_mes).slice(0,10);
+  const tbodyM = document.querySelector('#ranking-mejores-table tbody'); tbodyM.innerHTML='';
+  mejores.forEach(([key,s],i)=>{
+    tbodyM.appendChild(el('tr','', `<td><span class="rank-num">${i+1}</span></td>
+      <td><b>${s.info.tienda_nombre||key}</b></td><td><span class="pill-tag">${s.info.zona||''}</span></td>
+      <td>${s.info.ejecutiva||''}</td><td style="color:var(--ok);font-weight:700">${pct(s.promedio_cobertura_mes)}</td>
+      <td>${s.dias_rojo_mes}</td>`));
+  });
+
+  const peores = stores.slice().sort((a,b)=>b[1].dias_rojo_mes-a[1].dias_rojo_mes).slice(0,10);
+  const tbodyP = document.querySelector('#ranking-peores-table tbody'); tbodyP.innerHTML='';
+  peores.forEach(([key,s],i)=>{
+    tbodyP.appendChild(el('tr','', `<td><span class="rank-num">${i+1}</span></td>
+      <td><b>${s.info.tienda_nombre||key}</b></td><td><span class="pill-tag">${s.info.zona||''}</span></td>
+      <td>${s.info.ejecutiva||''}</td><td style="color:var(--bad);font-weight:700">${s.dias_rojo_mes} día(s)</td>
+      <td>${pct(s.promedio_cobertura_mes)}</td>`));
   });
 }
 
