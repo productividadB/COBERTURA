@@ -789,7 +789,7 @@ function renderKpis(){
   const alarmantes = stores.filter(s=>s.hoy.semaforo==='ALARMANTE').length;
   const criticas = stores.filter(s=>s.hoy.semaforo==='CRITICA').length;
   const coberturaGlobal = stores.length ? stores.reduce((a,s)=>a+s.hoy.cobertura_pct,0)/stores.length : 0;
-  const rotacionProm = stores.length ? stores.reduce((a,s)=>a+s.rotacion_pct,0)/stores.length : 0;
+  const faltasHoy = stores.reduce((a,s)=>a+s.hoy.faltantes_hoy,0);
 
   const row = document.getElementById('kpi-row'); row.innerHTML='';
   [
@@ -797,9 +797,13 @@ function renderKpis(){
     {n:`${totalActivos} / ${Math.round(totalPlantilla)}`, l:'Plantilla activa vs. autorizada', c:'accent'},
     {n:alarmantes, l:'Tiendas alarmantes (sin usuario en tienda)', c:'bad'},
     {n:criticas, l:'Tiendas críticas (1 solo activo)', c:'bad'},
-    {n:pct(rotacionProm), l:'% Rotación promedio del mes', c:'warn'},
+    {n:faltasHoy, l:'Faltas en el día', c:'warn', click:openFaltasModal},
     {n:stores.length, l:'Tiendas operando', c:'ok'},
-  ].forEach(k=> row.appendChild(el('div','kpi c-'+k.c, `<div class="n disp">${k.n}</div><div class="l">${k.l}</div>`)));
+  ].forEach(k=>{
+    const card = el('div','kpi c-'+k.c, `<div class="n disp">${k.n}</div><div class="l">${k.l}</div>`);
+    if(k.click){ card.style.cursor='pointer'; card.addEventListener('click', k.click); }
+    row.appendChild(card);
+  });
 }
 
 function renderUrgent(){
